@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "559692445617",
+    "project_id": "tcsopener",
+    "storage_bucket": "tcsopener.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:559692445617:android:f3cd0e5dd7abeb6019ef90",
+        "android_client_info": {
+          "package_name": "com.rs.tcsopener"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "559692445617-18ldcqu9hvhfutd4o0rja2bu4j550hgp.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCVxiyc3AAXix4a-wzJDbIR2j0MW7_Fkus"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "559692445617-18ldcqu9hvhfutd4o0rja2bu4j550hgp.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

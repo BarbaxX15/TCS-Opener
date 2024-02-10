@@ -1,0 +1,11 @@
+*.iml
+.gradle
+.idea
+.DS_Store
+app/build
+.externalNativeBuild
+.cxx
+local.properties
+gradle.properties
+/MQTT Broker/node_modules
+/MQTT Broker/firebase.json

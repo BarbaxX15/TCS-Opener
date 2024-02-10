@@ -1,0 +1,2 @@
+rootProject.name = "TCS Opener"
+include ':app'
