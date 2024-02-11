@@ -1,21 +1,31 @@
 
-#include <PubSubClient.h>
 #include <ESP8266WiFi.h>
+#include <Arduino.h>
+#include <PicoMQTT.h>
+#include <FirebaseESP8266.h>
 
-WiFiClient net;
-PubSubClient client(net);
+//----------------CONFIG------------------//
+#define wifi_ssid "SSID"
+#define wifi_pass "WIFIPASS"
 
-char wifi_ssid[] = "";
-char wifi_pass[] = "";
-char mqtt_server_ip[] = "";
-char mqtt_port[] = "1883";
-char mqtt_topic_bell[] = "home/bell";
-char mqtt_topic_open[] = "home/open";
-char mqtt_client_name[] = "TCS Opener";
-char mqtt_user[] = "";
-char mqtt_pass[] = "";
-char mqtt_open_command[] = "open";
+#define mqtt_topic_open "home/open" //topic for Android App (default)
+#define mqtt_user "USER" //for auth by Android App
+#define mqtt_pass "PASS" //for auth by Android App
+#define mqtt_open_command "open" //sent by Android App (default)
 
+//upload program to ESP and read SN from Serial Monitor after pressing doorbell (0XXXXXYY or 1XXXXXYY,
+//where XXXXX is your SN)
+#define TCS_SERIAL "XXXXX"
+
+#define FIREBASE_PROJECT_ID "FIREBASE_PROJECT_ID" // retrieve from firebase.json
+#define FIREBASE_CLIENT_EMAIL "FIREBASE_CLIENT_EMAIL" // retrieve from firebase.json
+#define FIREBASE_MESSAGE_TOPIC "doorbell" //topic received by Android App
+// retrieve from firebase.json
+const char PRIVATE_KEY[] PROGMEM = "-----BEGIN PRIVATE KEY----------END PRIVATE KEY-----\n";
+//--------------END CONFIG----------------//
+
+
+// TCS
 #define inputPin 12 // D6
 #define outputPin 14 // D5
 #define startBit 6
@@ -23,9 +33,77 @@ char mqtt_open_command[] = "open";
 #define zeroBit 2
 #define opener_short 4352 // HEX: 1100 | BIN: 0001000100000000
 
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+
 volatile uint32_t CMD = 0;
 volatile uint8_t lengthCMD = 0;
 volatile bool cmdReady;
+
+class MQTT: public PicoMQTT::Server {
+    protected:
+        PicoMQTT::ConnectReturnCode auth(const char * client_id, const char * username, const char * password) override {
+            // only accept client IDs which are 3 chars or longer
+            if (String(client_id).length() < 3) {    // client_id is never NULL
+                return PicoMQTT::CRC_IDENTIFIER_REJECTED;
+            }
+
+            // only accept connections if username and password are provided
+            if (!username || !password) {  // username and password can be NULL
+                // no username or password supplied
+                return PicoMQTT::CRC_NOT_AUTHORIZED;
+            }
+
+            // accept two user/password combinations
+            if (String(username) == mqtt_user && String(password) == mqtt_pass) {
+                return PicoMQTT::CRC_ACCEPTED;
+                Serial.println("Client connected.");
+            }
+
+            // reject all other credentials
+            return PicoMQTT::CRC_BAD_USERNAME_OR_PASSWORD;
+        }
+}mqtt;
+
+// Network functions
+void sendFirebaseMessage(const char *payload){
+    FCM_HTTPv1_JSON_Message msg;
+    msg.topic = FIREBASE_MESSAGE_TOPIC;
+
+    FirebaseJson message;
+    message.add("id", payload);
+    msg.data = message.raw();
+
+    msg.android.priority = "high";
+
+    if (Firebase.FCM.send(&fbdo, &msg)) // send message to recipient
+        Serial.println("Sent.");
+    else
+        Serial.println(fbdo.errorReason());
+}
+
+void setupFirebase(){
+    config.service_account.data.client_email = FIREBASE_CLIENT_EMAIL;
+    config.service_account.data.project_id = FIREBASE_PROJECT_ID;
+    config.service_account.data.private_key = PRIVATE_KEY;
+    Firebase.reconnectNetwork(false);
+    fbdo.setBSSLBufferSize(4096 /* Rx buffer size in bytes from 512 - 16384 */, 1024 /* Tx buffer size in bytes from 512 - 16384 */);
+    Firebase.begin(&config, &auth);
+}
+
+void setupMqttBroker(){
+    mqtt.subscribe(mqtt_topic_open, [](const char * topic, const char * payload) {
+        Serial.print("MQTT payload incoming: ");
+        Serial.println(payload);
+        if(strcmp(payload,mqtt_open_command)==0){
+            Serial.println("MQTT open command received.");
+            sendProtocolHEX(opener_short);
+        }
+    });
+    mqtt.begin();
+    Serial.println("MQTT broker started on port 1883.");
+}
 
 void connectToWiFi()
 {
@@ -41,37 +119,8 @@ void connectToWiFi()
     Serial.println(WiFi.localIP());
 }
 
-void connectToMqtt()
-{
-    Serial.print("MQTT server address: ");
-    Serial.println(mqtt_server_ip);
-    Serial.print("MQTT port: ");
-    Serial.println(atoi(mqtt_port));
-    Serial.print("Connecting to MQTT");
-    client.setServer(mqtt_server_ip, atoi(mqtt_port));
 
-    while (!client.connect(mqtt_client_name, mqtt_user, mqtt_pass))
-    {
-        Serial.print(".");
-        delay(5000);
-    }
-    Serial.println("");
-    Serial.println("Connected to MQTT.");
-    client.setCallback(mqttCallback);
-    client.subscribe(mqtt_topic_open);
-}
-
-void mqttCallback(char *topic, byte *payload, unsigned int length)
-{
-    char payload_string[(sizeof payload) + 1];
-    memcpy(payload_string, payload, sizeof payload);
-    payload_string[sizeof payload] = 0; // Null termination.
-    Serial.println(payload_string);
-    if(strcmp(payload_string,mqtt_open_command)==0){
-      Serial.println("MQTT open command received");
-      sendProtocolHEX(opener_short);
-    }
-}
+// TCS functions
 
 void ICACHE_RAM_ATTR analyzeCMD()
 {
@@ -220,7 +269,8 @@ void setup()
     pinMode(outputPin, OUTPUT);
     attachInterrupt(digitalPinToInterrupt(inputPin), analyzeCMD, CHANGE);
     connectToWiFi();
-    connectToMqtt();
+    setupMqttBroker();
+    setupFirebase();
 }
 
 void loop()
@@ -229,19 +279,21 @@ void loop()
     {
         connectToWiFi();
     }
-    if (!client.connected())
-    {
-        connectToMqtt();
-    }
-    client.loop();
+
+    mqtt.loop();
+
     if (cmdReady)
     {
         Serial.print("Protocol received: ");
         printHEX(CMD);
-        Serial.println("Publishing to MQTT.");
         cmdReady = 0;
-        char byte_cmd[9];
-        sprintf(byte_cmd, "%08x", CMD);
-        client.publish(mqtt_topic_bell, byte_cmd);
+        if(Firebase.ready()){
+            char byte_cmd[9];
+            sprintf(byte_cmd, "%08x", CMD);
+            if(strcmp(byte_cmd,TCS_SERIAL)==1){  
+                Serial.println("Publishing to Firebase.");
+                sendFirebaseMessage(byte_cmd);
+            }
+        }
     }
 }
