@@ -290,7 +290,7 @@ void loop()
         if(Firebase.ready()){
             char byte_cmd[9];
             sprintf(byte_cmd, "%08x", CMD);
-            if(strcmp(byte_cmd,TCS_SERIAL)==1){  
+            if(strstr(byte_cmd,TCS_SERIAL)!=NULL){
                 Serial.println("Publishing to Firebase.");
                 sendFirebaseMessage(byte_cmd);
             }
